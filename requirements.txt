@@ -1,0 +1,21 @@
+fastapi
+uvicorn
+python-dotenv
+pydantic
+pydantic-settings
+httpx
+boto3
+
+# Genblaze
+genblaze-core
+genblaze-s3
+genblaze-openai
+genblaze-elevenlabs
+genblaze-gmicloud
+
+# Media
+ffmpeg-python
+Pillow
+
+# Frontend
+streamlit
