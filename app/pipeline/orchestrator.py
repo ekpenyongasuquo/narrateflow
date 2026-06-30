@@ -1,11 +1,8 @@
 import os
-import uuid
 import json
-import asyncio
-from pathlib import Path
 from genblaze_core import Pipeline, Modality
 from genblaze_openai import DalleProvider, OpenAITTSProvider
-from app.core.storage import get_b2_sink
+from app.core.storage import get_b2_sink, get_output_dir
 from app.core.config import settings
 from app.pipeline.script_gen import generate_script
 from app.pipeline.critic import evaluate_scene_image
@@ -13,6 +10,7 @@ from app.pipeline.assembler import assemble_video
 from app.utils.logger import PipelineLogger
 
 MAX_RETRIES = 3
+
 
 async def run_narrateflow_pipeline(
     job_id: str,
@@ -23,10 +21,7 @@ async def run_narrateflow_pipeline(
 ) -> dict:
 
     logger = PipelineLogger(job_id)
-    output_dir = Path(settings.job_output_dir) / job_id
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    sink = get_b2_sink()
+    output_dir = get_output_dir(job_id)
     results = {"job_id": job_id, "sections": []}
 
     # ── STEP 1: Script Generation ──────────────────────────
@@ -48,16 +43,22 @@ async def run_narrateflow_pipeline(
         # Step 2: Image Generation with retry loop
         image_path = None
         eval_result = {}
-        
+
         for attempt in range(1, MAX_RETRIES + 1):
             img_prompt = section["visual_prompt"]
             if attempt > 1:
                 img_prompt += f" (refined attempt {attempt})"
 
+            # Fresh sink per run — required since genblaze 0.3.4 closes
+            # the sink's resources (boto3 clients, upload threads) after
+            # each run() call to prevent leaks in long-running services.
+            image_sink = get_b2_sink()
+
             run, manifest = (
                 Pipeline(f"narrateflow-image-{job_id}-s{n}-a{attempt}")
                 .step(
                     DalleProvider(
+                        api_key=settings.openai_api_key,
                         output_dir=str(output_dir / "frames")
                     ),
                     model="dall-e-3",
@@ -65,10 +66,12 @@ async def run_narrateflow_pipeline(
                     modality=Modality.IMAGE,
                     size="1024x1024",
                 )
-                .run(sink=sink, timeout=120)
+                .run(sink=image_sink, timeout=120, raise_on_failure=True)
             )
 
-            image_path = run.outputs[0].local_path
+            step = run.steps[0]
+            asset = step.assets[0]
+            image_path = asset.url
 
             # Step 4: Critic evaluation
             eval_result = evaluate_scene_image(
@@ -86,11 +89,14 @@ async def run_narrateflow_pipeline(
                 if attempt == MAX_RETRIES:
                     logger.log(f"section_{n}_max_retries_reached", {})
 
-        # Step 3: Audio Generation
+        # Step 3: Audio Generation — fresh sink again
+        audio_sink = get_b2_sink()
+
         audio_run, audio_manifest = (
             Pipeline(f"narrateflow-audio-{job_id}-s{n}")
             .step(
                 OpenAITTSProvider(
+                    api_key=settings.openai_api_key,
                     output_dir=str(output_dir / "audio")
                 ),
                 model="tts-1-hd",
@@ -99,10 +105,12 @@ async def run_narrateflow_pipeline(
                 voice="nova",
                 response_format="mp3",
             )
-            .run(sink=sink, timeout=60)
+            .run(sink=audio_sink, timeout=60, raise_on_failure=True)
         )
 
-        audio_path = audio_run.outputs[0].local_path
+        audio_step = audio_run.steps[0]
+        audio_asset = audio_step.assets[0]
+        audio_path = audio_asset.url
         logger.log(f"section_{n}_audio_complete", {"path": audio_path})
 
         approved_sections.append({
