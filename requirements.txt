@@ -1,22 +1,23 @@
-fastapi
-uvicorn
-python-dotenv
-pydantic
-pydantic-settings
-httpx
-boto3
-pytest
-
-# Genblaze
-genblaze-core==0.3.4
-genblaze-s3==0.3.4
-genblaze-openai==0.3.1
-genblaze-elevenlabs==0.3.1
-genblaze-gmicloud==0.3.1
-
-# Media
-ffmpeg-python
-Pillow
-
-# Frontend
-streamlit
+(echo fastapi
+echo uvicorn
+echo python-dotenv
+echo pydantic
+echo pydantic-settings
+echo httpx
+echo boto3
+echo pytest
+echo pytest-asyncio
+echo.
+echo # Genblaze
+echo genblaze-core==0.3.4
+echo genblaze-s3==0.3.4
+echo genblaze-openai==0.3.1
+echo genblaze-elevenlabs==0.3.1
+echo genblaze-gmicloud==0.3.1
+echo.
+echo # Media
+echo ffmpeg-python
+echo Pillow
+echo.
+echo # Frontend
+echo streamlit) > requirements.txt
