@@ -1,12 +1,15 @@
 import subprocess
 from pathlib import Path
 import httpx
+from app.core.storage import get_presigned_url, b2_url_to_key
 
 
-def _download_file(url: str, dest_path: Path) -> Path:
-    """Download a file from B2 URL to local path."""
-    with httpx.Client(timeout=60) as client:
-        response = client.get(url)
+def _download_b2_file(b2_url: str, dest_path: Path) -> Path:
+    """Download a private B2 file using a presigned URL."""
+    b2_key = b2_url_to_key(b2_url)
+    presigned_url = get_presigned_url(b2_key, expiry_seconds=3600)
+    with httpx.Client(timeout=120) as client:
+        response = client.get(presigned_url)
         response.raise_for_status()
         dest_path.write_bytes(response.content)
     return dest_path
@@ -18,7 +21,8 @@ def assemble_video(
     output_dir: Path,
 ) -> Path:
     """
-    Download B2 assets per section, compose image+audio clips,
+    Download B2 assets per section via presigned URLs,
+    compose image+audio clips with ffmpeg,
     concatenate into final MP4.
     """
     clips_dir = output_dir / "clips"
@@ -26,16 +30,16 @@ def assemble_video(
 
     clip_paths = []
 
-    for i, item in enumerate(sections):
+    for item in sections:
         section_num = item["section"]["section_number"]
 
         # Download image from B2
         image_path = clips_dir / f"scene_{section_num}.png"
-        _download_file(item["image_path"], image_path)
+        _download_b2_file(item["image_path"], image_path)
 
         # Download audio from B2
         audio_path = clips_dir / f"narration_{section_num}.mp3"
-        _download_file(item["audio_path"], audio_path)
+        _download_b2_file(item["audio_path"], audio_path)
 
         # Compose clip: image held for duration of audio
         clip_path = clips_dir / f"clip_{section_num}.mp4"

@@ -4,7 +4,11 @@ from app.models.schemas import VideoJobRequest, VideoJobResponse, JobStatus
 from app.pipeline.orchestrator import run_narrateflow_pipeline
 
 router = APIRouter()
-jobs = {}  # In-memory store — replace with Redis later
+
+# In-memory job store — sufficient for hackathon demo
+# Replace with Redis for production
+jobs: dict = {}
+
 
 @router.post("/generate", response_model=VideoJobResponse)
 async def generate_video(
@@ -26,6 +30,7 @@ async def generate_video(
             )
             jobs[job_id]["status"] = JobStatus.completed
             jobs[job_id]["result"] = result
+            jobs[job_id]["video_url"] = result.get("video_presigned_url")
         except Exception as e:
             jobs[job_id]["status"] = JobStatus.failed
             jobs[job_id]["error"] = str(e)
@@ -33,13 +38,19 @@ async def generate_video(
     background_tasks.add_task(run_job)
     return VideoJobResponse(job_id=job_id, status=JobStatus.pending)
 
+
 @router.get("/status/{job_id}", response_model=VideoJobResponse)
 def get_job_status(job_id: str):
     job = jobs.get(job_id)
     if not job:
-        return VideoJobResponse(job_id=job_id, status=JobStatus.failed, error="Job not found")
+        return VideoJobResponse(
+            job_id=job_id,
+            status=JobStatus.failed,
+            error="Job not found"
+        )
     return VideoJobResponse(
         job_id=job_id,
         status=job["status"],
-        error=job.get("error")
+        video_url=job.get("video_url"),
+        error=job.get("error"),
     )
