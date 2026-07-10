@@ -74,3 +74,25 @@ def get_output_dir(job_id: str) -> Path:
     output_dir = _tmp / "narrateflow" / job_id
     output_dir.mkdir(parents=True, exist_ok=True)
     return output_dir
+def get_presigned_url(b2_key: str, expiry_seconds: int = 3600) -> str:
+    """Generate a presigned URL for temporary public access to a B2 object."""
+    import boto3
+    s3 = boto3.client(
+        "s3",
+        endpoint_url=f"https://{settings.b2_endpoint}",
+        aws_access_key_id=settings.b2_key_id,
+        aws_secret_access_key=settings.b2_application_key,
+        region_name="us-east-005",
+    )
+    return s3.generate_presigned_url(
+        "get_object",
+        Params={"Bucket": settings.b2_bucket_name, "Key": b2_key},
+        ExpiresIn=expiry_seconds,
+    )
+
+
+def b2_url_to_key(b2_url: str) -> str:
+    """Extract the B2 object key from a full B2 URL."""
+    # URL format: https://s3.us-east-005.backblazeb2.com/bucket-name/key
+    parts = b2_url.split(f"{settings.b2_bucket_name}/", 1)
+    return parts[1] if len(parts) > 1 else b2_url
