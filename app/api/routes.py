@@ -54,3 +54,15 @@ def get_job_status(job_id: str):
         video_url=job.get("video_url"),
         error=job.get("error"),
     )
+@router.get("/check-ffmpeg")
+def check_ffmpeg():
+    import subprocess
+    result = subprocess.run(
+        ["ffmpeg", "-version"],
+        capture_output=True,
+        text=True
+    )
+    if result.returncode == 0:
+        version = result.stdout.split("\n")[0]
+        return {"ffmpeg": "available", "version": version}
+    return {"ffmpeg": "not_available", "error": result.stderr[:200]}
