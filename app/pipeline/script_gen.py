@@ -31,7 +31,7 @@ Return JSON with this exact structure:
       "section_number": 1,
       "heading": "string",
       "narration_text": "string (2-3 clear sentences appropriate for {audience_level})",
-      "visual_prompt": "string (detailed DALL-E image prompt, clinical setting, African healthcare context, bright lighting, educational illustration style)"
+      "visual_prompt": "string (safe educational illustration prompt: show medical equipment, diagrams, or healthcare workers in training context only — no graphic medical procedures, no bodily fluids, no distressing imagery — bright clean clinical setting, African healthcare context, professional medical education style)"
     }}
   ]
 }}
