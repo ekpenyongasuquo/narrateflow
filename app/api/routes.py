@@ -1,24 +1,40 @@
 import uuid
 import asyncio
 import threading
+import json
+from pathlib import Path
 from fastapi import APIRouter
 from app.models.schemas import VideoJobRequest, VideoJobResponse, JobStatus
 from app.pipeline.orchestrator import run_narrateflow_pipeline
 
 router = APIRouter()
-jobs: dict = {}
+
+JOBS_DIR = Path("/tmp/narrateflow/jobs")
+JOBS_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def save_job(job_id: str, data: dict):
+    job_file = JOBS_DIR / f"{job_id}.json"
+    job_file.write_text(json.dumps(data))
+
+
+def load_job(job_id: str) -> dict | None:
+    job_file = JOBS_DIR / f"{job_id}.json"
+    if not job_file.exists():
+        return None
+    return json.loads(job_file.read_text())
 
 
 @router.post("/generate", response_model=VideoJobResponse)
 async def generate_video(request: VideoJobRequest):
     job_id = str(uuid.uuid4())
-    jobs[job_id] = {"status": JobStatus.pending}
+    save_job(job_id, {"status": JobStatus.pending})
 
     def run_in_thread():
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
-            jobs[job_id]["status"] = JobStatus.running
+            save_job(job_id, {"status": JobStatus.running})
             result = loop.run_until_complete(
                 run_narrateflow_pipeline(
                     job_id=job_id,
@@ -28,12 +44,16 @@ async def generate_video(request: VideoJobRequest):
                     num_sections=request.sections,
                 )
             )
-            jobs[job_id]["status"] = JobStatus.completed
-            jobs[job_id]["result"] = result
-            jobs[job_id]["video_url"] = result.get("video_presigned_url")
+            save_job(job_id, {
+                "status": JobStatus.completed,
+                "video_url": result.get("video_presigned_url"),
+                "result": result,
+            })
         except Exception as e:
-            jobs[job_id]["status"] = JobStatus.failed
-            jobs[job_id]["error"] = str(e)
+            save_job(job_id, {
+                "status": JobStatus.failed,
+                "error": str(e),
+            })
         finally:
             loop.close()
 
@@ -45,7 +65,7 @@ async def generate_video(request: VideoJobRequest):
 
 @router.get("/status/{job_id}", response_model=VideoJobResponse)
 def get_job_status(job_id: str):
-    job = jobs.get(job_id)
+    job = load_job(job_id)
     if not job:
         return VideoJobResponse(
             job_id=job_id,
