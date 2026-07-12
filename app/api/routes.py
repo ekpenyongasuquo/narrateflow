@@ -60,6 +60,11 @@ def get_job_status(job_id: str):
     )
 
 
+@router.get("/ping")
+def ping():
+    return {"pong": True}
+
+
 @router.get("/check-ffmpeg")
 def check_ffmpeg():
     import subprocess

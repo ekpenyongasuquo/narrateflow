@@ -3,7 +3,7 @@ import httpx
 import time
 
 # ── Config ────────────────────────────────────────────────────────────────────
-API_BASE = "https://narrateflow-rafx.onrender.com"  # change to localhost:8000 for local testing
+API_BASE = "https://narrateflow-rafx.onrender.com"
 
 st.set_page_config(
     page_title="NarrateFlow",
@@ -23,6 +23,16 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.divider()
+
+# ── Wake up API on page load ──────────────────────────────────────────────────
+if "api_awake" not in st.session_state:
+    with st.spinner("Connecting to NarrateFlow API..."):
+        try:
+            httpx.get(f"{API_BASE}/ping", timeout=60)
+            st.session_state["api_awake"] = True
+        except Exception as e:
+            st.warning(f"API may be slow to respond: {e}")
+            st.session_state["api_awake"] = False
 
 # ── Input Form ────────────────────────────────────────────────────────────────
 st.subheader("📋 Generate a Training Video")
@@ -71,7 +81,7 @@ if submitted:
         st.error("Please enter a procedure title.")
         st.stop()
 
-    with st.spinner("Submitting job..."):
+    with st.spinner("Submitting job to NarrateFlow pipeline..."):
         try:
             response = httpx.post(
                 f"{API_BASE}/api/v1/generate",
@@ -81,7 +91,7 @@ if submitted:
                     "language": language,
                     "sections": num_sections,
                 },
-                timeout=30,
+                timeout=60,
             )
             response.raise_for_status()
             job_data = response.json()
@@ -105,15 +115,20 @@ if "job_id" in st.session_state:
     progress_bar = st.progress(0)
     result_placeholder = st.empty()
 
-    # Poll status
-    max_polls = 120  # 10 minutes max
-    poll_interval = 5  # seconds
+    max_polls = 180  # 30 minutes max
+    poll_interval = 10  # seconds
 
     for poll in range(max_polls):
         try:
+            # Keep-alive ping every poll to prevent free tier spin-down
+            try:
+                httpx.get(f"{API_BASE}/ping", timeout=5)
+            except Exception:
+                pass
+
             status_response = httpx.get(
                 f"{API_BASE}/api/v1/status/{job_id}",
-                timeout=10,
+                timeout=30,
             )
             status_data = status_response.json()
             status = status_data.get("status", "unknown")
@@ -124,10 +139,13 @@ if "job_id" in st.session_state:
 
             elif status == "running":
                 elapsed = poll * poll_interval
-                progress = min(10 + (elapsed // 10) * 5, 85)
+                progress = min(10 + (elapsed // 10) * 3, 85)
+                minutes = elapsed // 60
+                seconds = elapsed % 60
                 status_placeholder.info(
-                    f"⚙️ Pipeline running... ({elapsed}s elapsed)\n\n"
-                    f"Generating script → images → audio → assembling video"
+                    f"⚙️ Pipeline running... ({minutes}m {seconds}s elapsed)\n\n"
+                    f"**Steps:** Script → Scene Images → Narration Audio "
+                    f"→ Critic Evaluation → Video Assembly → B2 Upload"
                 )
                 progress_bar.progress(int(progress))
 
@@ -145,25 +163,26 @@ if "job_id" in st.session_state:
                         st.video(video_url)
                         st.markdown(f"**[📥 Download Video]({video_url})**")
                     else:
-                        st.warning("Video URL not available yet.")
+                        st.warning("Video URL not available — check B2 bucket.")
 
                     st.divider()
                     st.subheader("📊 Pipeline Provenance")
                     st.markdown("""
-                    | Component | Status |
-                    |-----------|--------|
-                    | Script Generation | ✅ GPT-4o-mini |
-                    | Scene Images | ✅ gpt-image-1 via Genblaze |
-                    | Narration Audio | ✅ TTS-1-HD via Genblaze |
-                    | Critic Evaluation | ✅ GPT-4o-mini Vision |
-                    | Video Assembly | ✅ ffmpeg |
-                    | Storage | ✅ Backblaze B2 |
+| Component | Provider | Status |
+|-----------|----------|--------|
+| Script Generation | GPT-4o-mini | ✅ |
+| Scene Images | gpt-image-1 via Genblaze | ✅ |
+| Narration Audio | TTS-1-HD via Genblaze | ✅ |
+| Critic Evaluation | GPT-4o-mini Vision | ✅ |
+| Video Assembly | ffmpeg | ✅ |
+| Asset Storage | Backblaze B2 | ✅ |
+| Provenance Manifests | Genblaze SHA-256 | ✅ |
                     """)
 
                     st.info(
-                        "All assets — images, audio, scripts, manifests, "
-                        "and pipeline logs — are stored on Backblaze B2 "
-                        "with SHA-256 provenance tracking via Genblaze."
+                        "All assets — scene images, narration audio, scripts, "
+                        "Genblaze manifests, and pipeline logs — are stored on "
+                        "Backblaze B2 with SHA-256 provenance tracking."
                     )
 
                     if st.button("🔁 Generate Another Video"):
@@ -184,10 +203,15 @@ if "job_id" in st.session_state:
             time.sleep(poll_interval)
 
         except Exception as e:
-            status_placeholder.warning(f"Polling error: {e} — retrying...")
+            status_placeholder.warning(
+                f"⚠️ Polling error ({poll + 1}/{max_polls}): {e} — retrying..."
+            )
             time.sleep(poll_interval)
     else:
-        status_placeholder.error("⏰ Timeout — job took too long. Check back later.")
+        status_placeholder.error(
+            "⏰ Timeout — pipeline is taking longer than expected. "
+            "Check the Render logs or try again."
+        )
 
 # ── Footer ────────────────────────────────────────────────────────────────────
 st.divider()
