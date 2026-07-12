@@ -28,7 +28,7 @@ st.divider()
 if "api_awake" not in st.session_state:
     with st.spinner("Connecting to NarrateFlow API..."):
         try:
-            httpx.get(f"{API_BASE}/ping", timeout=60)
+            httpx.get(f"{API_BASE}/api/v1/ping", timeout=60)
             st.session_state["api_awake"] = True
         except Exception as e:
             st.warning(f"API may be slow to respond: {e}")
@@ -122,7 +122,7 @@ if "job_id" in st.session_state:
         try:
             # Keep-alive ping every poll to prevent free tier spin-down
             try:
-                httpx.get(f"{API_BASE}/ping", timeout=5)
+                httpx.get(f"{API_BASE}/api/v1/ping", timeout=5)
             except Exception:
                 pass
 
