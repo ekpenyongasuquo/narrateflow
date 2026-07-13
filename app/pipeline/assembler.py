@@ -8,10 +8,12 @@ def _download_b2_file(b2_url: str, dest_path: Path) -> Path:
     """Download a private B2 file using a presigned URL."""
     b2_key = b2_url_to_key(b2_url)
     presigned_url = get_presigned_url(b2_key, expiry_seconds=3600)
-    with httpx.Client(timeout=120) as client:
-        response = client.get(presigned_url)
-        response.raise_for_status()
-        dest_path.write_bytes(response.content)
+    with httpx.Client(timeout=300) as client:
+        with client.stream("GET", presigned_url) as response:
+            response.raise_for_status()
+            with open(dest_path, "wb") as f:
+                for chunk in response.iter_bytes(chunk_size=8192):
+                    f.write(chunk)
     return dest_path
 
 
@@ -20,11 +22,6 @@ def assemble_video(
     sections: list,
     output_dir: Path,
 ) -> Path:
-    """
-    Download B2 assets per section via presigned URLs,
-    compose image+audio clips with ffmpeg,
-    concatenate into final MP4.
-    """
     clips_dir = output_dir / "clips"
     clips_dir.mkdir(parents=True, exist_ok=True)
 
@@ -33,16 +30,18 @@ def assemble_video(
     for item in sections:
         section_num = item["section"]["section_number"]
 
-        # Download image from B2
+        print(f"[{job_id}] downloading image for section {section_num}")
         image_path = clips_dir / f"scene_{section_num}.png"
         _download_b2_file(item["image_path"], image_path)
+        print(f"[{job_id}] image downloaded: {image_path.stat().st_size} bytes")
 
-        # Download audio from B2
+        print(f"[{job_id}] downloading audio for section {section_num}")
         audio_path = clips_dir / f"narration_{section_num}.mp3"
         _download_b2_file(item["audio_path"], audio_path)
+        print(f"[{job_id}] audio downloaded: {audio_path.stat().st_size} bytes")
 
-        # Compose clip: image held for duration of audio
         clip_path = clips_dir / f"clip_{section_num}.mp4"
+        print(f"[{job_id}] running ffmpeg for section {section_num}")
         cmd = [
             "ffmpeg", "-y",
             "-loop", "1",
@@ -56,21 +55,21 @@ def assemble_video(
             "-shortest",
             str(clip_path)
         ]
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
         if result.returncode != 0:
             raise RuntimeError(
-                f"ffmpeg failed for section {section_num}: {result.stderr}"
+                f"ffmpeg failed for section {section_num}: {result.stderr[-500:]}"
             )
+        print(f"[{job_id}] clip created: {clip_path}")
         clip_paths.append(str(clip_path))
 
-    # Write concat list
     concat_file = output_dir / "concat.txt"
     concat_file.write_text(
         "\n".join([f"file '{p}'" for p in clip_paths])
     )
 
-    # Concatenate all clips into final video
     final_path = output_dir / "final_video.mp4"
+    print(f"[{job_id}] concatenating clips")
     cmd = [
         "ffmpeg", "-y",
         "-f", "concat",
@@ -79,8 +78,9 @@ def assemble_video(
         "-c", "copy",
         str(final_path)
     ]
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
     if result.returncode != 0:
-        raise RuntimeError(f"ffmpeg concat failed: {result.stderr}")
+        raise RuntimeError(f"ffmpeg concat failed: {result.stderr[-500:]}")
 
+    print(f"[{job_id}] final video ready: {final_path}")
     return final_path
